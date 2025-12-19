@@ -68,6 +68,9 @@ After successful calibration, your settings are saved to `config.json`. This fil
 | `--mp N` | Override multiprocessing workers (default: 4) |
 | `--pruning-moves N` | Override pruning moves parameter |
 | `--pruning-breadth N` | Override pruning breadth parameter |
+| `--delay N` | Override move delay in milliseconds (default: 30) |
+| `--action-delay N` | Override action delay in milliseconds (default: 50) |
+| `--delay-variance N` | Override delay variance percentage (default: 20) |
 
 ### Examples
 
@@ -84,9 +87,62 @@ python bot.py --use-config --mp 8
 # Run with custom AI parameters
 python bot.py --use-config --mp 8 --pruning-moves 3 --pruning-breadth 5
 
+# Run with custom delay settings (more human-like)
+python bot.py --use-config --delay 50 --action-delay 80 --delay-variance 30
+
 # Run without config (uses hardcoded defaults)
 python bot.py
 ```
+
+## Delay Settings (Anti-Cheat)
+
+The bot includes configurable delays to make inputs appear more human-like, which helps avoid anti-cheat detection.
+
+### Delay Parameters
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `move_delay_ms` | Delay between each keypress (left/right movements) | 30ms |
+| `action_delay_ms` | Delay after actions like hold, rotate, and hard drop | 50ms |
+| `delay_variance_percent` | Random variance applied to delays (±%) | 20% |
+
+### How Variance Works
+
+The variance makes timing less predictable. For example, with a 30ms base delay and 20% variance:
+- Actual delays will range from 24ms to 36ms (30ms ± 20%)
+- Each delay is randomly calculated within this range
+
+### Configuration Methods
+
+1. **During Calibration**: The wizard prompts for delay settings in step 6
+2. **In config.json**: Manually edit the delay values
+3. **CLI Override**: Use `--delay`, `--action-delay`, or `--delay-variance` flags
+
+### Example config.json with delays
+
+```json
+{
+  "screen_offset": [0, 0],
+  "screen_resolution": [1920, 1080],
+  "board_top_left": [730, 82],
+  "board_bottom_right": [1185, 988],
+  "next_piece_xy_0": [1337, 192],
+  "next_piece_xy_4": [1337, 735],
+  "held_piece_xy": [615, 191],
+  "move_delay_ms": 30,
+  "action_delay_ms": 50,
+  "delay_variance_percent": 20
+}
+```
+
+### Recommended Delay Values
+
+| Use Case | move_delay_ms | action_delay_ms | variance |
+|----------|---------------|-----------------|----------|
+| Maximum Speed (risky) | 10 | 20 | 10 |
+| Balanced (default) | 30 | 50 | 20 |
+| Safe/Human-like | 50 | 80 | 30 |
+| Very Conservative | 80 | 120 | 40 |
 
 ### Manual Configuration (Legacy)
 

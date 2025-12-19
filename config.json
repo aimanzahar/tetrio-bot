@@ -8,23 +8,26 @@
     1080
   ],
   "board_top_left": [
-    730,
-    82
+    793,
+    250
   ],
   "board_bottom_right": [
-    1185,
-    988
+    1116,
+    887
   ],
   "next_piece_xy_0": [
-    1337,
-    192
+    1225,
+    333
   ],
   "next_piece_xy_4": [
-    1337,
-    735
+    1224,
+    719
   ],
   "held_piece_xy": [
-    615,
-    191
-  ]
+    714,
+    334
+  ],
+  "move_delay_ms": 35,
+  "action_delay_ms": 50,
+  "delay_variance_percent": 30
 }
