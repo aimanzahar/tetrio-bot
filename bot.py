@@ -2,6 +2,7 @@ from multiprocessing import Pool
 import argparse
 import json
 import os
+import random
 
 import keyboard
 import pyautogui
@@ -16,12 +17,26 @@ from tetris_ai import find_best_move
 
 CONFIG_FILE = "config.json"
 
+# Default delay settings (in milliseconds)
+DEFAULT_MOVE_DELAY_MS = 30
+DEFAULT_ACTION_DELAY_MS = 50
+DEFAULT_DELAY_VARIANCE_PERCENT = 20
+
 def load_config():
-    """Load configuration from config.json if it exists."""
+    """Load configuration from config.json if it exists.
+    Applies default values for any missing delay settings."""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
-                return json.load(f)
+                config = json.load(f)
+            # Apply defaults for delay settings if not present
+            if 'move_delay_ms' not in config:
+                config['move_delay_ms'] = DEFAULT_MOVE_DELAY_MS
+            if 'action_delay_ms' not in config:
+                config['action_delay_ms'] = DEFAULT_ACTION_DELAY_MS
+            if 'delay_variance_percent' not in config:
+                config['delay_variance_percent'] = DEFAULT_DELAY_VARIANCE_PERCENT
+            return config
         except (json.JSONDecodeError, IOError) as e:
             print(f"Warning: Could not load config file: {e}")
     return None
@@ -121,6 +136,24 @@ def run_calibration_wizard():
     # Get screen resolution (use the board area to estimate)
     screen_resolution = (primary_width, primary_height)
     
+    # Prompt for delay settings
+    print(f"\n--- Step 6/6: DELAY SETTINGS ---")
+    print("  Configure delays to make inputs appear more human-like.")
+    print("  This helps avoid anti-cheat detection.\n")
+    
+    print(f"  Move Delay: Delay between each keypress (default: {DEFAULT_MOVE_DELAY_MS}ms)")
+    move_delay_input = input(f"  Enter move delay in ms (or press Enter for default): ").strip()
+    move_delay_ms = int(move_delay_input) if move_delay_input else DEFAULT_MOVE_DELAY_MS
+    
+    print(f"\n  Action Delay: Delay after actions like hold/rotate (default: {DEFAULT_ACTION_DELAY_MS}ms)")
+    action_delay_input = input(f"  Enter action delay in ms (or press Enter for default): ").strip()
+    action_delay_ms = int(action_delay_input) if action_delay_input else DEFAULT_ACTION_DELAY_MS
+    
+    print(f"\n  Delay Variance: Random variance percentage (default: {DEFAULT_DELAY_VARIANCE_PERCENT}%)")
+    print("  Example: 20% variance on 30ms = delays between 24ms-36ms")
+    variance_input = input(f"  Enter variance percentage (or press Enter for default): ").strip()
+    delay_variance_percent = int(variance_input) if variance_input else DEFAULT_DELAY_VARIANCE_PERCENT
+    
     # Build the configuration
     config = {
         "screen_offset": list(screen_offset),
@@ -130,6 +163,9 @@ def run_calibration_wizard():
         "next_piece_xy_0": list(next_piece_0),
         "next_piece_xy_4": list(next_piece_4),
         "held_piece_xy": list(held_piece),
+        "move_delay_ms": move_delay_ms,
+        "action_delay_ms": action_delay_ms,
+        "delay_variance_percent": delay_variance_percent,
     }
     
     # Display results
@@ -142,6 +178,10 @@ def run_calibration_wizard():
     print(f"  Next Piece #1:      ({next_piece_0[0]}, {next_piece_0[1]})")
     print(f"  Next Piece #5:      ({next_piece_4[0]}, {next_piece_4[1]})")
     print(f"  Held Piece:         ({held_piece[0]}, {held_piece[1]})")
+    print(f"\nDelay settings:")
+    print(f"  Move Delay:         {move_delay_ms}ms")
+    print(f"  Action Delay:       {action_delay_ms}ms")
+    print(f"  Delay Variance:     {delay_variance_percent}%")
     
     print("\n" + "-" * 60)
     print("COPY-PASTE READY CONFIGURATION:")
@@ -184,6 +224,23 @@ key_delay = 0.01
 # Game Settings - DAS 40ms, ARR 0ms, SDF max, lowest graphic
 
 
+def get_delay_with_variance(base_delay_ms, variance_percent):
+    """Calculate delay with random variance.
+    
+    Args:
+        base_delay_ms: Base delay in milliseconds
+        variance_percent: Variance percentage (e.g., 20 for ±20%)
+    
+    Returns:
+        Delay in seconds (for use with time.sleep)
+    """
+    if base_delay_ms <= 0:
+        return 0
+    variance = variance_percent / 100.0
+    actual_delay_ms = base_delay_ms * (1 + random.uniform(-variance, variance))
+    return max(0, actual_delay_ms / 1000.0)  # Convert to seconds
+
+
 class TetrioBot:
     def __init__(
         self,
@@ -196,7 +253,10 @@ class TetrioBot:
         held_piece_xy,
         pruning_moves,
         pruning_breadth,
-        mp
+        mp,
+        move_delay_ms=DEFAULT_MOVE_DELAY_MS,
+        action_delay_ms=DEFAULT_ACTION_DELAY_MS,
+        delay_variance_percent=DEFAULT_DELAY_VARIANCE_PERCENT
     ):
         self.screen_offset = screen_offset
         self.screen_resolution = screen_resolution
@@ -219,6 +279,11 @@ class TetrioBot:
         self.pruning_moves = pruning_moves
         self.pruning_breadth = pruning_breadth
         self.mp_pool = Pool(processes=mp) if mp > 1 else None
+        
+        # Delay settings
+        self.move_delay_ms = move_delay_ms
+        self.action_delay_ms = action_delay_ms
+        self.delay_variance_percent = delay_variance_percent
 
         self.screen_image = Image()
         self.refresh_screen_image()
@@ -319,12 +384,15 @@ class TetrioBot:
                 break
         return board
 
-    @staticmethod
-    def place_piece(best_position, rotations, need_hold):
+    def place_piece(self, best_position, rotations, need_hold):
+        """Place a piece with configurable delays for more human-like inputs."""
+        move_delay = lambda: get_delay_with_variance(self.move_delay_ms, self.delay_variance_percent)
+        action_delay = lambda: get_delay_with_variance(self.action_delay_ms, self.delay_variance_percent)
+        
         if need_hold:
             keyboard.press(hold_key)
             keyboard.release(hold_key)
-            time.sleep(key_delay)
+            time.sleep(action_delay())
         if rotations[0] != 0:
             match rotations[0]:
                 case 1:
@@ -337,21 +405,19 @@ class TetrioBot:
                     raise NotImplementedError
             keyboard.press(key)
             keyboard.release(key)
-            time.sleep(key_delay)
+            time.sleep(action_delay())
 
         # press left arrow or right arrow to move to position
         if best_position < 3:
             for i in range(3 - best_position):
                 keyboard.press(move_left_key)
                 keyboard.release(move_left_key)
-                if key_delay > 0:
-                    time.sleep(key_delay)
+                time.sleep(move_delay())
         elif best_position > 3:
             for i in range(best_position - 3):
                 keyboard.press(move_right_key)
                 keyboard.release(move_right_key)
-                if key_delay > 0:
-                    time.sleep(key_delay)
+                time.sleep(move_delay())
         if len(rotations) > 1:
             keyboard.press('down')
             time.sleep(soft_drop_delay)
@@ -369,12 +435,12 @@ class TetrioBot:
                         raise NotImplementedError
                 keyboard.press(key)
                 keyboard.release(key)
-                time.sleep(key_delay)
+                time.sleep(move_delay())
             keyboard.release('down')
         # press space to drop piece
         keyboard.press('space')
         keyboard.release('space')
-        time.sleep(key_delay)
+        time.sleep(action_delay())
 
     def run(self):
         combo = 0
@@ -460,6 +526,12 @@ def main():
                         help='Breadth for pruning (default: 5)')
     parser.add_argument('--mp', type=int, default=16,
                         help='Number of multiprocessing workers (default: 16)')
+    parser.add_argument('--delay', type=int, default=None,
+                        help='Override move delay in milliseconds (e.g., --delay 50)')
+    parser.add_argument('--action-delay', type=int, default=None,
+                        help='Override action delay in milliseconds')
+    parser.add_argument('--delay-variance', type=int, default=None,
+                        help='Override delay variance percentage')
     
     args = parser.parse_args()
     
@@ -474,7 +546,13 @@ def main():
             print("Error: No config.json found. Run with --calibrate first.")
             return
         
+        # Apply CLI overrides for delay settings
+        move_delay_ms = args.delay if args.delay is not None else config.get('move_delay_ms', DEFAULT_MOVE_DELAY_MS)
+        action_delay_ms = args.action_delay if args.action_delay is not None else config.get('action_delay_ms', DEFAULT_ACTION_DELAY_MS)
+        delay_variance_percent = args.delay_variance if args.delay_variance is not None else config.get('delay_variance_percent', DEFAULT_DELAY_VARIANCE_PERCENT)
+        
         print(f"Loaded configuration from {CONFIG_FILE}")
+        print(f"Delay settings: move={move_delay_ms}ms, action={action_delay_ms}ms, variance={delay_variance_percent}%")
         bot = TetrioBot(
             screen_offset=tuple(config['screen_offset']),
             screen_resolution=tuple(config['screen_resolution']),
@@ -485,12 +563,22 @@ def main():
             held_piece_xy=tuple(config['held_piece_xy']),
             pruning_moves=args.pruning_moves,
             pruning_breadth=args.pruning_breadth,
-            mp=args.mp
+            mp=args.mp,
+            move_delay_ms=move_delay_ms,
+            action_delay_ms=action_delay_ms,
+            delay_variance_percent=delay_variance_percent
         )
     else:
         # Use default/hardcoded values
         # Note: These values are based on a secondary-screen which has a TETR.IO window title bar(22px) but no windows-taskbar.
         #       If you have only 1 monitor, you may hide your windows-taskbar or measure the values for your own setting.
+        
+        # Apply CLI overrides for delay settings or use defaults
+        move_delay_ms = args.delay if args.delay is not None else DEFAULT_MOVE_DELAY_MS
+        action_delay_ms = args.action_delay if args.action_delay is not None else DEFAULT_ACTION_DELAY_MS
+        delay_variance_percent = args.delay_variance if args.delay_variance is not None else DEFAULT_DELAY_VARIANCE_PERCENT
+        
+        print(f"Delay settings: move={move_delay_ms}ms, action={action_delay_ms}ms, variance={delay_variance_percent}%")
         bot = TetrioBot(
             # screen_offset=(0, 0),  # most common case
             screen_offset=(-1920, 0),
@@ -502,7 +590,10 @@ def main():
             held_piece_xy=(691, 300),
             pruning_moves=args.pruning_moves,
             pruning_breadth=args.pruning_breadth,
-            mp=args.mp
+            mp=args.mp,
+            move_delay_ms=move_delay_ms,
+            action_delay_ms=action_delay_ms,
+            delay_variance_percent=delay_variance_percent
         )
     
     time.sleep(1)
