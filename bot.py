@@ -1,6 +1,10 @@
 from multiprocessing import Pool
+import argparse
+import json
+import os
 
 import keyboard
+import pyautogui
 import time
 import numpy as np
 import math
@@ -9,6 +13,162 @@ from PIL.Image import Image
 
 from constants import colors, colors_name, tetris_pieces, NUM_ROW, NUM_COL
 from tetris_ai import find_best_move
+
+CONFIG_FILE = "config.json"
+
+def load_config():
+    """Load configuration from config.json if it exists."""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Could not load config file: {e}")
+    return None
+
+
+def save_config(config):
+    """Save configuration to config.json."""
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+    print(f"\nConfiguration saved to {CONFIG_FILE}")
+
+
+def run_calibration_wizard():
+    """
+    Interactive calibration wizard to capture screen coordinates for TetrioBot.
+    Guides the user through clicking on specific positions on the game screen.
+    """
+    print("\n" + "=" * 60)
+    print("       TETRIOBOT CALIBRATION WIZARD")
+    print("=" * 60)
+    print("\nThis wizard will help you configure the screen coordinates")
+    print("for the TetrioBot. You will be guided through 5 steps.\n")
+    print("INSTRUCTIONS:")
+    print("  1. Position your TETR.IO game window where you want it")
+    print("  2. For each step, move your mouse to the indicated position")
+    print("  3. Press '=' key to capture the current mouse position")
+    print("  4. Press 'Escape' to cancel calibration at any time\n")
+    
+    # Detect screen offset for multi-monitor setups
+    screens = pyautogui.size()
+    print(f"Detected primary screen resolution: {screens[0]}x{screens[1]}")
+    
+    # Try to detect monitor offset
+    # pyautogui.position() returns absolute coordinates across all monitors
+    print("\nTo detect your monitor offset, please move your mouse to the")
+    print("TOP-LEFT corner of your TETR.IO game window and press '='")
+    print("(This helps with multi-monitor setups)\n")
+    
+    steps = [
+        ("BOARD TOP-LEFT", "Click on the TOP-LEFT corner of the game board (where pieces stack)"),
+        ("BOARD BOTTOM-RIGHT", "Click on the BOTTOM-RIGHT corner of the game board"),
+        ("NEXT PIECE #1", "Click on the CENTER of the FIRST next piece (top of next queue)"),
+        ("NEXT PIECE #5", "Click on the CENTER of the FIFTH next piece (bottom of next queue)"),
+        ("HELD PIECE", "Click on the CENTER of the HELD piece display"),
+    ]
+    
+    captured_positions = []
+    
+    for i, (name, instruction) in enumerate(steps, 1):
+        print(f"\n--- Step {i}/5: {name} ---")
+        print(f"  {instruction}")
+        print("  >> Move your mouse to the position and press '=' to capture")
+        print("  >> Press 'Escape' to cancel")
+        
+        # Wait for keypress
+        while True:
+            event = keyboard.read_event(suppress=False)
+            if event.event_type == keyboard.KEY_DOWN:
+                if event.name == '=':
+                    pos = pyautogui.position()
+                    captured_positions.append(pos)
+                    print(f"  ✓ Captured: ({pos[0]}, {pos[1]})")
+                    time.sleep(0.2)  # Small delay to prevent double-capture
+                    break
+                elif event.name == 'escape':
+                    print("\n\nCalibration cancelled by user.")
+                    return None
+    
+    # Process captured positions
+    board_top_left = captured_positions[0]
+    board_bottom_right = captured_positions[1]
+    next_piece_0 = captured_positions[2]
+    next_piece_4 = captured_positions[3]
+    held_piece = captured_positions[4]
+    
+    # Calculate screen offset (assume primary monitor if board is on it)
+    # Use the top-left of the board to determine which monitor
+    screen_offset = (0, 0)
+    
+    # Check if position suggests a different monitor
+    primary_width, primary_height = pyautogui.size()
+    if board_top_left[0] < 0:
+        # Left of primary monitor
+        screen_offset = (board_top_left[0] - (board_top_left[0] % primary_width), 0)
+    elif board_top_left[0] >= primary_width:
+        # Right of primary monitor
+        screen_offset = (primary_width, 0)
+    
+    # Ask user about screen offset
+    print(f"\n--- Screen Offset Detection ---")
+    print(f"  Detected board position: ({board_top_left[0]}, {board_top_left[1]})")
+    print(f"  Suggested screen_offset: {screen_offset}")
+    print(f"\n  If your game is on a secondary monitor, you may need to adjust this.")
+    print(f"  Common values: (0, 0) for primary, (-1920, 0) for left monitor,")
+    print(f"  (1920, 0) for right monitor")
+    
+    # Get screen resolution (use the board area to estimate)
+    screen_resolution = (primary_width, primary_height)
+    
+    # Build the configuration
+    config = {
+        "screen_offset": list(screen_offset),
+        "screen_resolution": list(screen_resolution),
+        "board_top_left": list(board_top_left),
+        "board_bottom_right": list(board_bottom_right),
+        "next_piece_xy_0": list(next_piece_0),
+        "next_piece_xy_4": list(next_piece_4),
+        "held_piece_xy": list(held_piece),
+    }
+    
+    # Display results
+    print("\n" + "=" * 60)
+    print("       CALIBRATION COMPLETE!")
+    print("=" * 60)
+    print("\nCaptured coordinates:\n")
+    print(f"  Board Top-Left:     ({board_top_left[0]}, {board_top_left[1]})")
+    print(f"  Board Bottom-Right: ({board_bottom_right[0]}, {board_bottom_right[1]})")
+    print(f"  Next Piece #1:      ({next_piece_0[0]}, {next_piece_0[1]})")
+    print(f"  Next Piece #5:      ({next_piece_4[0]}, {next_piece_4[1]})")
+    print(f"  Held Piece:         ({held_piece[0]}, {held_piece[1]})")
+    
+    print("\n" + "-" * 60)
+    print("COPY-PASTE READY CONFIGURATION:")
+    print("-" * 60)
+    print(f"""
+bot = TetrioBot(
+    screen_offset={tuple(screen_offset)},
+    screen_resolution={tuple(screen_resolution)},
+    board_top_left={tuple(board_top_left)},
+    board_bottom_right={tuple(board_bottom_right)},
+    next_piece_xy_0={tuple(next_piece_0)},
+    next_piece_xy_4={tuple(next_piece_4)},
+    held_piece_xy={tuple(held_piece)},
+    pruning_moves=5,
+    pruning_breadth=5,
+    mp=16
+)
+""")
+    
+    # Save to config file
+    save_config(config)
+    
+    print("\nYou can also run the bot with the saved config using:")
+    print("  python bot.py --use-config\n")
+    
+    return config
+
 
 # keybinds
 rotate_clockwise_key = 'x'
@@ -220,26 +380,33 @@ class TetrioBot:
         combo = 0
         b2b = 0
 
+        print("TetrioBot started. Waiting for game...", flush=True)
         last_next_pieces = self.get_next_pieces()
+        print(f"Initial next pieces detected: {last_next_pieces}", flush=True)
         expected_board = np.zeros((NUM_ROW, NUM_COL), dtype=np.int32)
         # for _ in range(100):
+        poll_count = 0
         while True:
             self.refresh_screen_image()
             next_pieces = self.get_next_pieces()
             while next_pieces == last_next_pieces:
+                poll_count += 1
+                if poll_count % 100 == 0:
+                    print(f"Polling for piece change... ({poll_count} iterations, current: {next_pieces})", flush=True)
                 time.sleep(wait_time)
                 self.refresh_screen_image()
                 next_pieces = self.get_next_pieces()
+            poll_count = 0
 
             current_piece = last_next_pieces[0]
             last_next_pieces = next_pieces
 
             current_board = self.get_tetris_board()
             if not np.all(np.equal(current_board, expected_board)):
-                print("Unexpected board")
+                print("Unexpected board", flush=True)
             held_piece = self.get_held_piece()
             if held_piece is None:
-                print("Held is None!!!")
+                print("Held is None!!!", flush=True)
                 keyboard.press(hold_key)
                 keyboard.release(hold_key)
                 time.sleep(key_delay)
@@ -254,7 +421,7 @@ class TetrioBot:
             )
             t2 = time.time()
 
-            print(f"score: {round(score):6}   b2b: {b2b:2}    time: {t2-t1}")
+            print(f"score: {round(score):6}   b2b: {b2b:2}    time: {t2-t1}", flush=True)
             if t2 - t1 < wait_time:
                 time.sleep(wait_time - t2 + t1)
 
@@ -281,21 +448,66 @@ class TetrioBot:
             # time.sleep(3)
 
 
-if __name__ == "__main__":
-    # Note: These values are based on a secondary-screen which has a TETR.IO window title bar(22px) but no windows-taskbar.
-    #       If you have only 1 monitor, you may hide your windows-taskbar or measure the values for your own setting.
-    bot = TetrioBot(
-        # screen_offset=(0, 0),  # most common case
-        screen_offset=(-1920, 0),
-        screen_resolution=(1920, 1080),
-        board_top_left=(787, 220),
-        board_bottom_right=(1133, 899),
-        next_piece_xy_0=(1260, 300),
-        next_piece_xy_4=(1260, 721),
-        held_piece_xy=(691, 300),
-        pruning_moves=5,
-        pruning_breadth=5,
-        mp=16
-    )
+def main():
+    parser = argparse.ArgumentParser(description='TetrioBot - An AI player for TETR.IO')
+    parser.add_argument('--calibrate', action='store_true',
+                        help='Run the calibration wizard to configure screen coordinates')
+    parser.add_argument('--use-config', action='store_true',
+                        help='Use saved configuration from config.json')
+    parser.add_argument('--pruning-moves', type=int, default=5,
+                        help='Number of moves for pruning (default: 5)')
+    parser.add_argument('--pruning-breadth', type=int, default=5,
+                        help='Breadth for pruning (default: 5)')
+    parser.add_argument('--mp', type=int, default=16,
+                        help='Number of multiprocessing workers (default: 16)')
+    
+    args = parser.parse_args()
+    
+    if args.calibrate:
+        run_calibration_wizard()
+        return
+    
+    # Load configuration
+    if args.use_config:
+        config = load_config()
+        if config is None:
+            print("Error: No config.json found. Run with --calibrate first.")
+            return
+        
+        print(f"Loaded configuration from {CONFIG_FILE}")
+        bot = TetrioBot(
+            screen_offset=tuple(config['screen_offset']),
+            screen_resolution=tuple(config['screen_resolution']),
+            board_top_left=tuple(config['board_top_left']),
+            board_bottom_right=tuple(config['board_bottom_right']),
+            next_piece_xy_0=tuple(config['next_piece_xy_0']),
+            next_piece_xy_4=tuple(config['next_piece_xy_4']),
+            held_piece_xy=tuple(config['held_piece_xy']),
+            pruning_moves=args.pruning_moves,
+            pruning_breadth=args.pruning_breadth,
+            mp=args.mp
+        )
+    else:
+        # Use default/hardcoded values
+        # Note: These values are based on a secondary-screen which has a TETR.IO window title bar(22px) but no windows-taskbar.
+        #       If you have only 1 monitor, you may hide your windows-taskbar or measure the values for your own setting.
+        bot = TetrioBot(
+            # screen_offset=(0, 0),  # most common case
+            screen_offset=(-1920, 0),
+            screen_resolution=(1920, 1080),
+            board_top_left=(787, 220),
+            board_bottom_right=(1133, 899),
+            next_piece_xy_0=(1260, 300),
+            next_piece_xy_4=(1260, 721),
+            held_piece_xy=(691, 300),
+            pruning_moves=args.pruning_moves,
+            pruning_breadth=args.pruning_breadth,
+            mp=args.mp
+        )
+    
     time.sleep(1)
     bot.run()
+
+
+if __name__ == "__main__":
+    main()

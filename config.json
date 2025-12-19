@@ -1,0 +1,30 @@
+{
+  "screen_offset": [
+    0,
+    0
+  ],
+  "screen_resolution": [
+    1920,
+    1080
+  ],
+  "board_top_left": [
+    730,
+    82
+  ],
+  "board_bottom_right": [
+    1185,
+    988
+  ],
+  "next_piece_xy_0": [
+    1337,
+    192
+  ],
+  "next_piece_xy_4": [
+    1337,
+    735
+  ],
+  "held_piece_xy": [
+    615,
+    191
+  ]
+}
